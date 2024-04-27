@@ -5,10 +5,13 @@ Werkzeug Documentation:  https://werkzeug.palletsprojects.com/
 This file creates your application.
 """
 
-from app import app
-from flask import render_template, request, jsonify, send_file
+from app import app, db
+from flask import render_template, request, jsonify, send_file, send_from_directory
 import os
-
+from .models import Movie
+from .forms import MovieForm
+from werkzeug.utils import secure_filename
+from flask_wtf.csrf import generate_csrf
 
 ###
 # Routing for your application.
@@ -17,6 +20,69 @@ import os
 @app.route('/')
 def index():
     return jsonify(message="This is the beginning of our API")
+
+@app.route('/api/v1/csrf-token', methods=['GET']) 
+def get_csrf():
+    return jsonify({'csrf_token': generate_csrf()})
+
+
+@app.route('/api/v1/movies', methods=['POST'])
+def movies():
+    form = MovieForm()
+
+    if request.method == 'POST':
+        print('val val')
+        if form.validate_on_submit():
+
+            poster = form.poster.data
+            filename = secure_filename(poster.filename)
+            poster.save(os.path.join(
+                app.config['UPLOAD_FOLDER'], filename
+            ))
+
+
+            movie = Movie(
+                form.title.data,
+                form.description.data,
+                filename
+            )
+
+            db.session.add(movie)
+            db.session.commit()
+
+            
+            feedback = {
+                "message": "Movie Successfully added",
+                "title": form.title.data,
+                "poster": filename,
+                "description": form.description.data
+            }
+
+            return jsonify(feedback)
+
+    return jsonify({"errors" : form_errors(form)})
+
+@app.route('/api/v1/posters/<filename>')
+def getPoster(filename):
+    root_dir = os.getcwd()
+    return send_from_directory(os.path.join(root_dir, app.config['UPLOAD_FOLDER']), filename)
+
+
+@app.route('/api/v1/movies', methods=['GET'])
+def showMovies():
+   
+    movies = db.session.execute(db.select(Movie)).scalars()
+    lst = []
+
+    for movie in movies:
+        lst.append({
+            "id": movie.id,
+            "title": movie.title,
+            "description": movie.description,
+            "poster": "/api/v1/posters/" + movie.poster
+        })
+
+    return jsonify(movies=lst)
 
 
 ###
@@ -35,6 +101,7 @@ def form_errors(form):
                     error
                 )
             error_messages.append(message)
+           
 
     return error_messages
 
@@ -61,3 +128,4 @@ def add_header(response):
 def page_not_found(error):
     """Custom 404 page."""
     return render_template('404.html'), 404
+
